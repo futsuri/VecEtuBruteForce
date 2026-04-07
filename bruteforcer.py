@@ -7,6 +7,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 import time
 import logging
 from datetime import datetime
+import json
+import os
 
 def init_interactive():
     print("▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓")
@@ -168,9 +170,139 @@ def click_continue():
         time.sleep(0.5)
         return False
 
+def save_credentials(email, password, filename="credentials.json"):
+    try:
+        credentials = {
+            "email": email,
+            "password": password
+        }
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(credentials, f, ensure_ascii=False, indent=2)
+        logger.info(f"save_credentials: учётные данные сохранены в файл {filename}")
+    except Exception as e:
+        logger.error(f"save_credentials: ошибка при сохранении учётных данных - {e}")
+
+def load_credentials(filename="credentials.json"):
+    try:
+        if not os.path.exists(filename):
+            logger.info(f"load_credentials: файл учётных данных {filename} не найден")
+            return None, None
+        
+        with open(filename, 'r', encoding='utf-8') as f:
+            credentials = json.load(f)
+        
+        email = credentials.get("email", "")
+        password = credentials.get("password", "")
+        
+        logger.info(f"load_credentials: учётные данные загружены из файла {filename}")
+        return email, password
+    except Exception as e:
+        logger.error(f"load_credentials: ошибка при загрузке учётных данных - {e}")
+        return None, None
+
+def ask_credentials():
+    print("УЧЁТНЫЕ ДАННЫЕ MOODLE")
+    
+    email = input("Введите email/логин: ").strip()
+    if not email:
+        logger.error("Email не введён")
+        print("[ERROR] Email не может быть пустым!")
+        return None, None
+    
+    password = input("Введите пароль: ").strip()
+    if not password:
+        logger.error("Пароль не введён")
+        print("[ERROR] Пароль не может быть пустым!")
+        return None, None
+    
+    logger.info(f"Пользователь ввёл email: {email}")
+    logger.info("Пароль введён")
+    
+    # Сохраняем учётные данные
+    save_credentials(email, password)
+    print("[OK] Учётные данные сохранены локально")
+    
+    return email, password
+
+def auto_login_if_on_login_page(email, password):
+    """Автоматически логиниться если браузер на странице логина"""
+    try:
+        current_url = driver.current_url
+        
+        # Проверяем, находимся ли мы на странице логина https://vec.etu.ru/moodle/login/index.php
+        if "vec.etu.ru/moodle/login" not in current_url.lower():
+            logger.debug(f"auto_login_if_on_login_page: не на странице логина (URL: {current_url})")
+            return False
+        
+        logger.info("auto_login_if_on_login_page: обнаружена страница логина, начинаем авторизацию")
+        print("\n[INFO] Обнаружена страница логина, авторизуюсь автоматически...")
+        
+        # Ищём поле для ввода email/логина
+        logger.info("auto_login_if_on_login_page: ищём поле для ввода email/логина")
+        email_input = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "username"))
+        )
+        logger.debug("auto_login_if_on_login_page: поле email найдено")
+        
+        # Ищём поле для ввода пароля
+        logger.info("auto_login_if_on_login_page: ищём поле для ввода пароля")
+        password_input = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "password"))
+        )
+        logger.debug("auto_login_if_on_login_page: поле пароля найдено")
+        
+        # Вводим email
+        logger.info(f"auto_login_if_on_login_page: вводим email/логин")
+        email_input.clear()
+        email_input.send_keys(email)
+        time.sleep(0.3)
+        
+        # Вводим пароль
+        logger.info(f"auto_login_if_on_login_page: вводим пароль")
+        password_input.clear()
+        password_input.send_keys(password)
+        time.sleep(0.3)
+        
+        # Ищём кнопку входа
+        logger.info("auto_login_if_on_login_page: ищём кнопку входа")
+        login_btn = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.ID, "loginbtn"))
+        )
+        logger.debug("auto_login_if_on_login_page: кнопка входа найдена")
+        
+        # Нажимаем кнопку входа
+        logger.info("auto_login_if_on_login_page: нажимаем кнопку входа")
+        login_btn.click()
+        print(f"[OK] Авторизация выполнена")
+        
+        # Ждём загрузки страницы
+        logger.info("auto_login_if_on_login_page: ждём загрузки страницы после входа")
+        time.sleep(2)
+        
+        logger.info(f"auto_login_if_on_login_page: авторизация завершена, новый URL: {driver.current_url}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"auto_login_if_on_login_page: ошибка при авторизации - {e}")
+        print(f"[ERROR] Ошибка при автоматической авторизации: {e}")
+        return False
+
 def main():
     logger.info("="*80)
     logger.info("Запуск MOODLE LESSON BRUTE FORCER")
+    
+    # Загружаем или запрашиваем учётные данные
+    email, password = load_credentials()
+    if not email or not password:
+        logger.info("main: учётные данные не найдены, запрашиваем у пользователя")
+        email, password = ask_credentials()
+        if not email or not password:
+            logger.error("main: не удалось получить учётные данные")
+            print("[ERROR] Не удалось получить учётные данные, завершаю работу")
+            return
+    else:
+        logger.info("main: учётные данные загружены из файла")
+        print("[OK] Учётные данные загружены из сохранённого файла")
     
     print("\nОткрываю браузер...")
     driver.get("about:blank")
@@ -178,17 +310,27 @@ def main():
     time.sleep(0.5)
     
     print("\nИнструкции:")
-    print("   1. В открытом браузере введите ссылку на первую страницу лекции")
+    print("   1. В открытом браузере перейдите на первую страницу лекции")
     print("   2. Убедитесь, что вы на первой странице теста")
-    print("   3. Вернитесь сюда в терминал и напишите: Готово")
-    input("\nКогда готово, напишите 'Готово' и нажмите Enter: ")
+    print("   3. Вернитесь сюда в терминал и нажмите Enter")
+    input("\nКогда готово, нажмите Enter: ")
     
     current_url = driver.current_url
     logger.info(f"Пользователь готов. Текущий URL: {current_url}")
+    
+    # Проверяем, не на странице ли логина
+    if "vec.etu.ru/moodle/login" in current_url.lower():
+        logger.info("main: пользователь находится на странице логина, выполняю автоматическую авторизацию")
+        if not auto_login_if_on_login_page(email, password):
+            logger.error("main: автоматическая авторизация не удалась")
+            print("[ERROR] Не удалось авторизоваться автоматически")
+            return
+        time.sleep(1)
+    
     print(f"\n[OK] Начинаю разбор лекции...")
     logger.info("="*80)
     logger.info(f"Запуск авто-прохождения лекции")
-    logger.info(f"URL: {current_url}")
+    logger.info(f"URL: {driver.current_url}")
 
     question_count = 0
     no_questions_warned = False
@@ -197,6 +339,18 @@ def main():
         logger.info("="*80)
         logger.info(f"Итерация цикла #{question_count + 1}, URL: {driver.current_url}")
         logger.debug(f"Page title: {driver.title}")
+        
+        # Проверяем, не произошел ли редирект на страницу логина
+        if "vec.etu.ru/moodle/login" in driver.current_url.lower():
+            logger.warning("main: обнаружен редирект на страницу логина, выполняю автоматическую авторизацию")
+            print("\n[WARNING] Обнаружен редирект на страницу логина")
+            if not auto_login_if_on_login_page(email, password):
+                logger.error("main: автоматическая авторизация не удалась")
+                print("[ERROR] Не удалось авторизоваться автоматически, пожалуйста авторизуйтесь вручную")
+                input("Когда авторизация завершена, нажмите Enter: ")
+                time.sleep(1)
+            else:
+                time.sleep(1)
         
         if not is_question_page():
             if READ_LECTURES:
@@ -324,6 +478,7 @@ def main():
     logger.info(f"[OK] Скрипт завершён. Пройдено вопросов: {question_count}")
     print(f"\n[OK] ГОТОВО - пройдено вопросов: {question_count}")
     print(f"[INFO] Логи сохранены в файл: {log_filename}")
+    
     input("\nНажмите Enter для закрытия браузера...")
 
 if __name__ == "__main__":
